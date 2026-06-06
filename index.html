@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AspamHub</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#home" aria-label="AspamHub home">
+          <span class="brand-mark" aria-hidden="true">A</span>
+          <span>
+            <strong>AspamHub</strong>
+            <small>School community</small>
+          </span>
+        </a>
+
+        <nav class="topnav" aria-label="Primary navigation">
+          <a href="#home">Feed</a>
+          <a href="#qotd">Daily Question</a>
+          <a href="#admin" id="adminNavLink" class="admin-hidden">Admin</a>
+        </nav>
+
+        <div class="top-actions">
+          <button class="icon-button" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">
+            <svg class="moon-icon" aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M20.2 15.3A8.2 8.2 0 0 1 8.7 3.8 8.8 8.8 0 1 0 20.2 15.3Z" />
+            </svg>
+          </button>
+          <button class="secondary-button" id="openLogin">Log in</button>
+          <button class="primary-button" id="openSignup">Sign up</button>
+          <button class="secondary-button hidden" id="logoutButton">Log out</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero" id="home">
+          <div class="hero-copy">
+            <h1>AspamHub</h1>
+            <p>
+              Discussions, daily questions, teacher posts, and school community updates in one place.
+            </p>
+            <div class="hero-actions">
+              <button class="primary-button" id="startPosting">Create post</button>
+              <button class="secondary-button" id="teacherVerifyShortcut">Teacher verify</button>
+            </div>
+          </div>
+
+          <aside class="qotd-card" id="qotd" aria-labelledby="qotdTitle">
+            <div class="section-label">Question of the Day</div>
+            <h2 id="qotdTitle">What is one thing that would make school life easier this week?</h2>
+            <p>New prompt every day. Admin can schedule or replace the daily question.</p>
+            <form id="qotdForm" class="inline-form">
+              <label for="qotdAnswer">Your answer</label>
+              <div>
+                <input id="qotdAnswer" type="text" placeholder="Share a short answer" />
+                <button type="submit">Post</button>
+              </div>
+            </form>
+          </aside>
+        </section>
+
+        <section class="workspace" aria-label="Community workspace">
+          <aside class="side-panel">
+            <div class="panel-section">
+              <h2>Current User</h2>
+              <div class="current-user">
+                <div class="profile-frame small">
+                  <span>D</span>
+                </div>
+                <div>
+                  <strong id="activeUserName">Guest</strong>
+                  <p id="activeUserRole">visitor</p>
+                </div>
+              </div>
+              <form class="profile-picture-form" id="profilePictureForm">
+                <label for="profilePictureUrl">Profile picture</label>
+                <div>
+                  <input id="profilePictureUrl" type="url" placeholder="Image URL" />
+                  <button type="submit">Save</button>
+                </div>
+                <label for="profilePictureUpload">Or upload image</label>
+                <div>
+                  <input id="profilePictureUpload" type="file" accept="image/*" />
+                  <button type="submit">Save upload</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="panel-section admin-only admin-hidden">
+              <h2>Role Permissions</h2>
+              <ul class="permission-list">
+                <li><span>Students</span><strong>Browse, answer, optional anonymous</strong></li>
+                <li><span>Teachers</span><strong>Can start posting</strong></li>
+                <li><span>Admin</span><strong>Controls special display</strong></li>
+              </ul>
+            </div>
+
+            <div class="panel-section admin-only admin-hidden">
+              <h2>Research Notes</h2>
+              <p class="muted">
+                Research official school logo, public color references, and any approved school divisions only when needed.
+              </p>
+            </div>
+          </aside>
+
+          <section class="feed-column" aria-labelledby="feedTitle">
+            <div class="feed-header">
+              <div>
+                <h2 id="feedTitle">Forum Feed</h2>
+                <p>Profile lines, anonymous mode, teacher posts, and student council tags are shown here.</p>
+              </div>
+              <div class="feed-tools">
+                <label class="search-box" for="feedSearch">
+                  <span>Search feed</span>
+                  <input id="feedSearch" type="search" placeholder="Search posts, authors, roles" />
+                </label>
+                <div class="segmented-control" aria-label="Filter posts">
+                  <button class="is-active" data-filter="all">All</button>
+                  <button data-filter="teacher">Teacher</button>
+                  <button data-filter="anonymous">Anonymous</button>
+                </div>
+              </div>
+            </div>
+
+            <form class="composer" id="postComposer" aria-labelledby="composerTitle">
+              <div class="composer-title-row">
+                <h3 id="composerTitle">Create Forum Post</h3>
+                <span id="postingPermission">Teachers can post. Admin can post.</span>
+              </div>
+              <label for="postTitle">Title</label>
+              <input id="postTitle" required maxlength="90" placeholder="Write a clear school-friendly title" />
+
+              <label for="postBody">Post</label>
+              <textarea id="postBody" required rows="4" placeholder="Share an update, question, or discussion topic"></textarea>
+
+              <div class="composer-grid">
+                <label>
+                  Visibility
+                  <select id="postVisibility">
+                    <option>Whole school</option>
+                    <option>Teachers only</option>
+                    <option>Students only</option>
+                  </select>
+                </label>
+                <label class="toggle-row">
+                  <input id="anonymousToggle" type="checkbox" />
+                  <span>Anonymous posting option</span>
+                </label>
+              </div>
+
+              <button class="primary-button" type="submit">Publish post</button>
+            </form>
+
+            <div id="feed" class="feed-list" aria-live="polite"></div>
+          </section>
+
+          <aside class="admin-panel admin-hidden" id="admin" aria-labelledby="adminTitle">
+            <div class="admin-card">
+              <div class="section-label">Admin username: dakshithu</div>
+              <h2 id="adminTitle">Admin Controls</h2>
+              <p>
+                Only <strong>dakshithu</strong> can send the pipe symbol and specialty name display behavior.
+              </p>
+              <div class="admin-controls">
+                <form class="admin-mini-form" id="studentCouncilForm">
+                  <label for="studentCouncilUsername">Give Student Council Member</label>
+                  <div>
+                    <input id="studentCouncilUsername" required placeholder="username" />
+                    <button type="submit">Give</button>
+                  </div>
+                </form>
+                <form class="admin-mini-form" id="teacherVerifyAdminForm">
+                  <label for="teacherVerifyUsername">Mark Teacher Verified</label>
+                  <div>
+                    <input id="teacherVerifyUsername" required placeholder="teacher username" />
+                    <button type="submit">Verify</button>
+                  </div>
+                </form>
+                <button data-admin-action="specialName">Enable special name</button>
+                <button data-admin-action="qotd">Replace daily question</button>
+              </div>
+              <div class="admin-log" id="adminLog" aria-live="polite">
+                <p>Admin action log ready.</p>
+              </div>
+            </div>
+
+            <div class="admin-card compact">
+              <h2>Moderation Queue</h2>
+              <div class="moderation-queue" id="moderationQueue" aria-live="polite">
+                <p class="muted">No reported posts.</p>
+              </div>
+            </div>
+
+            <div class="admin-card compact">
+              <h2>Teacher Verification</h2>
+              <p id="verificationStatus">No pending verification.</p>
+              <button class="secondary-button" id="verifyTeacher">Verify as teacher</button>
+            </div>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="signupDialog" class="modal">
+      <form method="dialog" id="signupForm">
+        <button class="close-button" type="button" aria-label="Close sign up">x</button>
+        <h2>Create account</h2>
+        <p>Select student or teacher. Teachers can start posting after account creation.</p>
+
+        <label for="signupUsername">Username</label>
+        <input id="signupUsername" required placeholder="example: dakshithu" />
+
+        <label for="signupEmail">Email</label>
+        <input id="signupEmail" required type="email" placeholder="student@example.com" />
+
+        <label for="signupProfilePicture">Profile picture URL</label>
+        <input id="signupProfilePicture" type="url" placeholder="https://example.com/photo.jpg" />
+
+        <label for="signupProfilePictureUpload">Or upload profile picture</label>
+        <input id="signupProfilePictureUpload" type="file" accept="image/*" />
+
+        <label for="signupPassword">Password</label>
+        <input id="signupPassword" required minlength="6" type="password" placeholder="At least 6 characters" />
+
+        <div class="two-columns">
+          <label>
+            First name
+            <input id="firstName" required placeholder="First name" />
+          </label>
+          <label>
+            Last name
+            <input id="lastName" required placeholder="Last name" />
+          </label>
+        </div>
+
+        <fieldset>
+          <legend>Role selection</legend>
+          <label><input type="radio" name="role" value="student" checked /> Student</label>
+          <label><input type="radio" name="role" value="teacher" /> Teacher</label>
+        </fieldset>
+
+        <button class="primary-button" type="submit">Create account</button>
+      </form>
+    </dialog>
+
+    <dialog id="loginDialog" class="modal">
+      <form method="dialog" id="loginForm">
+        <button class="close-button" type="button" aria-label="Close login">x</button>
+        <h2>Log in</h2>
+        <p>Use the username and password you created.</p>
+
+        <label for="loginUsername">Username or email</label>
+        <input id="loginUsername" required placeholder="example: dakshithu or email@example.com" />
+
+        <label for="loginPassword">Password</label>
+        <input id="loginPassword" required minlength="6" type="password" placeholder="Your password" />
+
+        <button class="primary-button" type="submit">Log in</button>
+        <button class="link-button" id="forgotPasswordButton" type="button">Forgot password?</button>
+      </form>
+    </dialog>
+
+    <dialog id="forgotPasswordDialog" class="modal">
+      <form method="dialog" id="forgotPasswordForm">
+        <button class="close-button" type="button" aria-label="Close forgot password">x</button>
+        <h2>Forgot password</h2>
+        <p>Enter the email linked to your account.</p>
+
+        <label for="resetEmail">Email</label>
+        <input id="resetEmail" required type="email" placeholder="email@example.com" />
+
+        <button class="primary-button" type="submit">Send reset email</button>
+      </form>
+    </dialog>
+
+    <dialog id="cropDialog" class="modal crop-modal">
+      <form method="dialog" id="cropForm">
+        <button class="close-button" type="button" aria-label="Close crop editor">x</button>
+        <h2>Crop profile picture</h2>
+        <p>Move and zoom the image so the best part fits inside the profile frame.</p>
+
+        <div class="crop-stage">
+          <canvas id="cropCanvas" width="280" height="280" aria-label="Profile picture crop preview"></canvas>
+        </div>
+
+        <label for="cropZoom">Zoom</label>
+        <input id="cropZoom" type="range" min="1" max="3" value="1" step="0.01" />
+
+        <label for="cropX">Move left / right</label>
+        <input id="cropX" type="range" min="-100" max="100" value="0" step="1" />
+
+        <label for="cropY">Move up / down</label>
+        <input id="cropY" type="range" min="-100" max="100" value="0" step="1" />
+
+        <button class="primary-button" type="submit">Use cropped image</button>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
