@@ -296,16 +296,32 @@ async function saveProfileToSupabase(profile) {
 
   if (error) {
     showToast(`Profile save failed: ${error.message}`);
+    return;
   }
+
+  await supabaseClient.auth.updateUser({
+    data: {
+      username: profile.username,
+      role: profile.role,
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      profilePictureUrl: profile.profilePictureUrl || "",
+      profile_picture_url: profile.profilePictureUrl || "",
+    },
+  });
 }
 
 async function updateProfilePictureInSupabase(username, profilePictureUrl) {
-  if (!supabaseClient) return true;
+  if (!supabaseClient) return username;
+
+  const profile = await getProfileFromSupabase(username)
+    || (state.activeUser.email ? await getProfileByEmailFromSupabase(state.activeUser.email) : null);
+  const persistedUsername = profile?.username || username;
 
   const { data: updatedProfile, error } = await supabaseClient
     .from("profiles")
     .update({ profile_picture_url: profilePictureUrl })
-    .eq("username", username)
+    .eq("username", persistedUsername)
     .select("username")
     .maybeSingle();
 
@@ -338,7 +354,7 @@ async function updateProfilePictureInSupabase(username, profilePictureUrl) {
   const { error: postsError } = await supabaseClient
     .from("posts")
     .update({ profile_picture_url: profilePictureUrl })
-    .eq("author", username)
+    .eq("author", persistedUsername)
     .eq("is_anonymous", false);
 
   if (postsError) {
@@ -352,7 +368,7 @@ async function updateProfilePictureInSupabase(username, profilePictureUrl) {
     },
   });
 
-  return true;
+  return persistedUsername;
 }
 
 async function getProfileFromSupabase(username) {
@@ -701,6 +717,42 @@ async function setupSupabase() {
   }
 }
 
+async function restoreActiveSession() {
+  if (!supabaseClient) return;
+
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error || !data.session?.user) return;
+
+  const user = data.session.user;
+  const metadata = user.user_metadata || {};
+  const profile = user.email
+    ? await getProfileByEmailFromSupabase(user.email)
+    : metadata.username
+      ? await getProfileFromSupabase(metadata.username)
+      : null;
+
+  if (profile) {
+    setActiveUser(profile);
+    return;
+  }
+
+  if (metadata.username || user.email) {
+    setActiveUser({
+      username: metadata.username || user.email.split("@")[0],
+      email: user.email || "",
+      profilePictureUrl: metadata.profilePictureUrl || metadata.profile_picture_url || "",
+      role: isAdminUsername(metadata.username || "") ? "admin" : metadata.role || "student",
+      firstName: metadata.firstName || metadata.first_name || "",
+      lastName: metadata.lastName || metadata.last_name || "",
+      showFullName: isAdminUsername(metadata.username || ""),
+      isStudentCouncilMember: isAdminUsername(metadata.username || ""),
+      studentCouncilRow: isAdminUsername(metadata.username || "") ? "Grade 8B" : "",
+      specialNameDisplayEnabled: isAdminUsername(metadata.username || ""),
+      isTeacherVerified: false,
+    });
+  }
+}
+
 function renderPosts() {
   const query = state.searchQuery.trim().toLowerCase();
   const filtered = state.posts.filter((post) => {
@@ -911,8 +963,12 @@ document.querySelector("#signupForm").addEventListener("submit", async (event) =
         data: {
           username,
           role: normalizedRole,
+          firstName,
+          lastName,
           first_name: firstName,
           last_name: lastName,
+          profilePictureUrl,
+          profile_picture_url: profilePictureUrl,
         },
       },
     });
@@ -1168,19 +1224,30 @@ document.querySelector("#profilePictureForm").addEventListener("submit", async (
     return;
   }
 
-  const profilePictureUrl = cropState.profileDataUrl || document.querySelector("#profilePictureUrl").value.trim();
-  const saved = await updateProfilePictureInSupabase(state.activeUser.username, profilePictureUrl);
-  if (!saved) return;
+  const uploadInput = document.querySelector("#profilePictureUpload");
+  let profilePictureUrl = cropState.profileDataUrl || document.querySelector("#profilePictureUrl").value.trim();
+  if (!profilePictureUrl && uploadInput.files[0]) {
+    profilePictureUrl = await readImageFile(uploadInput.files[0]);
+  }
 
+  if (!profilePictureUrl) {
+    showToast("Choose an image or enter an image URL first.");
+    return;
+  }
+
+  const persistedUsername = await updateProfilePictureInSupabase(state.activeUser.username, profilePictureUrl);
+  if (!persistedUsername) return;
+
+  state.activeUser.username = persistedUsername;
   state.activeUser.profilePictureUrl = profilePictureUrl;
   document.querySelector("#profilePictureUrl").value = profilePictureUrl.startsWith("data:")
     ? ""
     : profilePictureUrl;
-  document.querySelector("#profilePictureUpload").value = "";
+  uploadInput.value = "";
   cropState.profileDataUrl = "";
 
   state.posts.forEach((post) => {
-    if (!post.isAnonymous && post.author === state.activeUser.username) {
+    if (!post.isAnonymous && post.author === persistedUsername) {
       post.profilePictureUrl = profilePictureUrl;
     }
   });
@@ -1389,6 +1456,7 @@ feed.addEventListener("submit", async (event) => {
 async function initializeApp() {
   updateActiveUser();
   await setupSupabase();
+  await restoreActiveSession();
   await loadQuestionOfDay();
   await loadFromSupabase();
   renderPosts();
