@@ -300,16 +300,59 @@ async function saveProfileToSupabase(profile) {
 }
 
 async function updateProfilePictureInSupabase(username, profilePictureUrl) {
-  if (!supabaseClient) return;
+  if (!supabaseClient) return true;
 
-  const { error } = await supabaseClient
+  const { data: updatedProfile, error } = await supabaseClient
     .from("profiles")
     .update({ profile_picture_url: profilePictureUrl })
-    .eq("username", username);
+    .eq("username", username)
+    .select("username")
+    .maybeSingle();
 
   if (error) {
     showToast(`Profile picture save failed: ${error.message}`);
+    return false;
   }
+
+  if (!updatedProfile) {
+    const { error: insertError } = await supabaseClient.from("profiles").insert({
+      username,
+      email: state.activeUser.email,
+      profile_picture_url: profilePictureUrl,
+      role: state.activeUser.role,
+      first_name: state.activeUser.firstName,
+      last_name: state.activeUser.lastName,
+      show_full_name: state.activeUser.showFullName,
+      is_student_council_member: state.activeUser.isStudentCouncilMember,
+      student_council_row: state.activeUser.studentCouncilRow || null,
+      special_name_display_enabled: state.activeUser.specialNameDisplayEnabled,
+      is_teacher_verified: state.activeUser.isTeacherVerified,
+    });
+
+    if (insertError) {
+      showToast(`Profile picture save failed: ${insertError.message}`);
+      return false;
+    }
+  }
+
+  const { error: postsError } = await supabaseClient
+    .from("posts")
+    .update({ profile_picture_url: profilePictureUrl })
+    .eq("author", username)
+    .eq("is_anonymous", false);
+
+  if (postsError) {
+    showToast(`Post profile pictures did not update: ${postsError.message}`);
+  }
+
+  await supabaseClient.auth.updateUser({
+    data: {
+      profilePictureUrl,
+      profile_picture_url: profilePictureUrl,
+    },
+  });
+
+  return true;
 }
 
 async function getProfileFromSupabase(username) {
@@ -499,16 +542,19 @@ async function saveQuestionOfDay(questionText) {
 }
 
 async function markPostRemoved(postId) {
-  if (!supabaseClient) return;
+  if (!supabaseClient) return true;
 
   const { error } = await supabaseClient
     .from("posts")
-    .update({ status: "removed" })
+    .delete()
     .eq("id", postId);
 
   if (error) {
-    showToast(`Post removal failed: ${error.message}`);
+    showToast(`Post delete failed: ${error.message}`);
+    return false;
   }
+
+  return true;
 }
 
 async function grantStudentCouncil(username) {
@@ -933,13 +979,15 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
     if (profile) {
       setActiveUser(profile);
     } else {
+      const { data: userData } = await supabaseClient.auth.getUser();
+      const metadata = userData.user?.user_metadata || {};
       setActiveUser({
-        username: usernameOrEmail.includes("@") ? email.split("@")[0] : usernameOrEmail,
+        username: metadata.username || (usernameOrEmail.includes("@") ? email.split("@")[0] : usernameOrEmail),
         email,
-        profilePictureUrl: "",
-        role: isAdminUsername(usernameOrEmail) ? "admin" : "student",
-        firstName: "",
-        lastName: "",
+        profilePictureUrl: metadata.profilePictureUrl || metadata.profile_picture_url || "",
+        role: isAdminUsername(usernameOrEmail) ? "admin" : metadata.role || "student",
+        firstName: metadata.firstName || "",
+        lastName: metadata.lastName || "",
         showFullName: isAdminUsername(usernameOrEmail),
         isStudentCouncilMember: isAdminUsername(usernameOrEmail),
         studentCouncilRow: isAdminUsername(usernameOrEmail) ? "Grade 8B" : "",
@@ -1121,6 +1169,9 @@ document.querySelector("#profilePictureForm").addEventListener("submit", async (
   }
 
   const profilePictureUrl = cropState.profileDataUrl || document.querySelector("#profilePictureUrl").value.trim();
+  const saved = await updateProfilePictureInSupabase(state.activeUser.username, profilePictureUrl);
+  if (!saved) return;
+
   state.activeUser.profilePictureUrl = profilePictureUrl;
   document.querySelector("#profilePictureUrl").value = profilePictureUrl.startsWith("data:")
     ? ""
@@ -1134,7 +1185,6 @@ document.querySelector("#profilePictureForm").addEventListener("submit", async (
     }
   });
 
-  await updateProfilePictureInSupabase(state.activeUser.username, profilePictureUrl);
   updateActiveUser();
   renderPosts();
   showToast("Profile picture updated.");
@@ -1257,8 +1307,10 @@ feed.addEventListener("click", async (event) => {
     const confirmed = window.confirm("Delete this post for everybody?");
     if (!confirmed) return;
 
-    post.status = "removed";
-    await markPostRemoved(post.id);
+    const deleted = await markPostRemoved(post.id);
+    if (!deleted) return;
+
+    state.posts = state.posts.filter((item) => item.id !== post.id);
     renderPosts();
     showToast("Post deleted for everybody.");
   }
@@ -1294,9 +1346,11 @@ document.querySelector("#moderationQueue").addEventListener("click", async (even
 
   if (removeButton) {
     report.status = "removed";
-    state.posts = state.posts.filter((post) => post.id !== report.postId);
     await updateReportStatus(reportId, "removed");
-    await markPostRemoved(report.postId);
+    const deleted = await markPostRemoved(report.postId);
+    if (!deleted) return;
+
+    state.posts = state.posts.filter((post) => post.id !== report.postId);
     renderPosts();
     showToast("Post removed from feed.");
   }
