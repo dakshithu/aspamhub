@@ -282,7 +282,6 @@ async function saveProfileToSupabase(profile) {
 
   const { error } = await supabaseClient.from("profiles").upsert({
     username: profile.username,
-    email: profile.email,
     profile_picture_url: profile.profilePictureUrl || "",
     role: profile.role,
     first_name: profile.firstName,
@@ -314,8 +313,10 @@ async function saveProfileToSupabase(profile) {
 async function updateProfilePictureInSupabase(username, profilePictureUrl) {
   if (!supabaseClient) return username;
 
+  const { data: userData } = await supabaseClient.auth.getUser();
+  const metadataUsername = userData.user?.user_metadata?.username;
   const profile = await getProfileFromSupabase(username)
-    || (state.activeUser.email ? await getProfileByEmailFromSupabase(state.activeUser.email) : null);
+    || (metadataUsername ? await getProfileFromSupabase(metadataUsername) : null);
   const persistedUsername = profile?.username || username;
 
   const { data: updatedProfile, error } = await supabaseClient
@@ -332,8 +333,7 @@ async function updateProfilePictureInSupabase(username, profilePictureUrl) {
 
   if (!updatedProfile) {
     const { error: insertError } = await supabaseClient.from("profiles").insert({
-      username,
-      email: state.activeUser.email,
+      username: persistedUsername,
       profile_picture_url: profilePictureUrl,
       role: state.activeUser.role,
       first_name: state.activeUser.firstName,
@@ -391,18 +391,9 @@ async function getProfileFromSupabase(username) {
 async function getProfileByEmailFromSupabase(email) {
   if (!supabaseClient) return null;
 
-  const { data, error } = await supabaseClient
-    .from("profiles")
-    .select("*")
-    .eq("email", email)
-    .maybeSingle();
-
-  if (error) {
-    showToast(`Profile load failed: ${error.message}`);
-    return null;
-  }
-
-  return data;
+  const { data: userData } = await supabaseClient.auth.getUser();
+  const username = userData.user?.user_metadata?.username || email.split("@")[0];
+  return getProfileFromSupabase(username);
 }
 
 async function saveCommentToSupabase(postId, comment) {
@@ -725,10 +716,10 @@ async function restoreActiveSession() {
 
   const user = data.session.user;
   const metadata = user.user_metadata || {};
-  const profile = user.email
-    ? await getProfileByEmailFromSupabase(user.email)
-    : metadata.username
-      ? await getProfileFromSupabase(metadata.username)
+  const profile = metadata.username
+    ? await getProfileFromSupabase(metadata.username)
+    : user.email
+      ? await getProfileFromSupabase(user.email.split("@")[0])
       : null;
 
   if (profile) {
