@@ -34,6 +34,8 @@ const guestUser = {
   specialNameDisplayEnabled: false,
 };
 
+const DEFAULT_QOTD = "What is one thing that would make school life easier this week?";
+
 const state = {
   activeUser: { ...guestUser },
   isLoggedIn: false,
@@ -42,6 +44,11 @@ const state = {
   openCommentsPostId: null,
   reports: [],
   posts: [],
+  questionOfDay: {
+    id: "",
+    text: DEFAULT_QOTD,
+    date: "",
+  },
 };
 
 const feed = document.querySelector("#feed");
@@ -159,6 +166,7 @@ function setActiveUser(profile) {
   };
   state.isLoggedIn = true;
   updateActiveUser();
+  renderPosts();
 }
 
 function profileLine(post) {
@@ -189,6 +197,20 @@ function renderProfileFrame(initials, profilePictureUrl = "", small = false) {
     : `<span>${escapeHtml(initials)}</span>`;
 
   return `<div class="profile-frame${sizeClass}" aria-hidden="true">${content}</div>`;
+}
+
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function updateQuestionOfDayTitle() {
+  document.querySelector("#qotdTitle").textContent = state.questionOfDay.text || DEFAULT_QOTD;
+}
+
+function canDeletePost(post) {
+  if (!state.isLoggedIn) return false;
+  if (state.activeUser.username === "dakshithu") return true;
+  return !post.isAnonymous && post.author.toLowerCase() === state.activeUser.username.toLowerCase();
 }
 
 function teacherStatus(post) {
@@ -382,6 +404,98 @@ async function updateReportStatus(reportId, status) {
   if (error) {
     showToast(`Report update failed: ${error.message}`);
   }
+}
+
+async function loadQuestionOfDay() {
+  const fallback = {
+    id: "",
+    text: DEFAULT_QOTD,
+    date: todayIsoDate(),
+  };
+
+  if (!supabaseClient) {
+    state.questionOfDay = fallback;
+    updateQuestionOfDayTitle();
+    return;
+  }
+
+  const today = todayIsoDate();
+  const { data: todayQuestion, error: todayError } = await supabaseClient
+    .from("questions_of_day")
+    .select("*")
+    .eq("question_date", today)
+    .maybeSingle();
+
+  if (todayError) {
+    showToast(`Question of the Day load failed: ${todayError.message}`);
+  }
+
+  let question = todayQuestion;
+  if (!question) {
+    const { data: latestQuestions, error: latestError } = await supabaseClient
+      .from("questions_of_day")
+      .select("*")
+      .order("question_date", { ascending: false })
+      .limit(1);
+
+    if (latestError) {
+      showToast(`Question of the Day fallback failed: ${latestError.message}`);
+    }
+
+    question = latestQuestions?.[0] || null;
+  }
+
+  state.questionOfDay = question
+    ? {
+        id: question.id,
+        text: question.question_text,
+        date: question.question_date,
+      }
+    : fallback;
+
+  updateQuestionOfDayTitle();
+}
+
+async function saveQuestionOfDay(questionText) {
+  const trimmedQuestion = questionText.trim();
+  if (!trimmedQuestion) return false;
+
+  const question = {
+    id: createId(),
+    text: trimmedQuestion,
+    date: todayIsoDate(),
+  };
+
+  state.questionOfDay = question;
+  updateQuestionOfDayTitle();
+
+  if (!supabaseClient) return true;
+
+  const { data, error } = await supabaseClient
+    .from("questions_of_day")
+    .upsert({
+      question_text: trimmedQuestion,
+      question_date: question.date,
+      created_by: state.activeUser.username,
+    }, { onConflict: "question_date" })
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    showToast(`Question of the Day save failed: ${error.message}`);
+    return false;
+  }
+
+  if (data) {
+    state.questionOfDay = {
+      id: data.id,
+      text: data.question_text,
+      date: data.question_date,
+    };
+    updateQuestionOfDayTitle();
+  }
+
+  return true;
 }
 
 async function markPostRemoved(postId) {
@@ -597,6 +711,7 @@ function renderPosts() {
           ${commentCount(post)} comments
         </button>
         <button type="button" data-report="${post.id}">Report</button>
+        ${canDeletePost(post) ? `<button type="button" data-delete-post="${post.id}">Delete for everybody</button>` : ""}
       </div>
       ${renderComments(post)}
     </article>
@@ -713,6 +828,7 @@ logoutButton.addEventListener("click", async () => {
   state.activeUser = { ...guestUser };
   state.isLoggedIn = false;
   updateActiveUser();
+  renderPosts();
   showToast("Logged out.");
 });
 
@@ -941,7 +1057,7 @@ document.querySelector("#qotdForm").addEventListener("submit", async (event) => 
     role: state.activeUser.role,
     initials: state.activeUser.username.charAt(0).toUpperCase(),
     profilePictureUrl: state.activeUser.profilePictureUrl,
-    title: "Question of the Day response",
+    title: `Question of the Day: ${state.questionOfDay.text}`,
     body: answer,
     visibility: "Whole school",
     isAnonymous: false,
@@ -1034,7 +1150,6 @@ document.querySelectorAll("[data-admin-action]").forEach((button) => {
     const actions = {
       studentCouncil: "Assigned optional Student Council Member tag and member row.",
       specialName: "Enabled optional name, first name and last name display with pipe specialty behavior.",
-      qotd: "Prepared Question of the Day replacement workflow.",
     };
 
     document.querySelector("#adminLog").innerHTML = `<p>${actions[button.dataset.adminAction]}</p>`;
@@ -1070,10 +1185,30 @@ document.querySelector("#teacherVerifyAdminForm").addEventListener("submit", asy
   showToast(`${username} is now a verified teacher.`);
 });
 
+document.querySelector("#qotdAdminForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.activeUser.username !== "dakshithu") {
+    showToast("Only admin dakshithu can change the Question of the Day.");
+    return;
+  }
+
+  const input = document.querySelector("#qotdAdminQuestion");
+  const question = input.value.trim();
+  const saved = await saveQuestionOfDay(question);
+
+  if (!saved) return;
+
+  document.querySelector("#adminLog").innerHTML =
+    `<p>Question of the Day changed to: ${escapeHtml(question)}</p>`;
+  event.currentTarget.reset();
+  showToast("Question of the Day updated.");
+});
+
 feed.addEventListener("click", async (event) => {
   const voteButton = event.target.closest("[data-vote]");
   const reportButton = event.target.closest("[data-report]");
   const commentsButton = event.target.closest("[data-comments]");
+  const deleteButton = event.target.closest("[data-delete-post]");
 
   if (voteButton) {
     const post = state.posts.find((item) => item.id === voteButton.dataset.vote);
@@ -1108,6 +1243,24 @@ feed.addEventListener("click", async (event) => {
     await saveReportToSupabase(report);
     renderModerationQueue();
     showToast("Post sent to moderation queue.");
+  }
+
+  if (deleteButton) {
+    const post = state.posts.find((item) => item.id === deleteButton.dataset.deletePost);
+    if (!post) return;
+
+    if (!canDeletePost(post)) {
+      showToast("You do not have permission to delete this post.");
+      return;
+    }
+
+    const confirmed = window.confirm("Delete this post for everybody?");
+    if (!confirmed) return;
+
+    post.status = "removed";
+    await markPostRemoved(post.id);
+    renderPosts();
+    showToast("Post deleted for everybody.");
   }
 
   if (commentsButton) {
@@ -1182,6 +1335,7 @@ feed.addEventListener("submit", async (event) => {
 async function initializeApp() {
   updateActiveUser();
   await setupSupabase();
+  await loadQuestionOfDay();
   await loadFromSupabase();
   renderPosts();
   renderModerationQueue();

@@ -179,8 +179,14 @@
                     <button type="submit">Verify</button>
                   </div>
                 </form>
+                <form class="admin-mini-form" id="qotdAdminForm">
+                  <label for="qotdAdminQuestion">Replace daily question</label>
+                  <div>
+                    <input id="qotdAdminQuestion" required placeholder="New Question of the Day" />
+                    <button type="submit">Replace</button>
+                  </div>
+                </form>
                 <button data-admin-action="specialName">Enable special name</button>
-                <button data-admin-action="qotd">Replace daily question</button>
               </div>
               <div class="admin-log" id="adminLog" aria-live="polite">
                 <p>Admin action log ready.</p>
