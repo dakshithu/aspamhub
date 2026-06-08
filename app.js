@@ -45,17 +45,23 @@ const LOCAL_STATE_KEY = "aspamhub.localState.v1";
 const state = {
   activeUser: { ...guestUser },
   isLoggedIn: false,
+  activeUserId: "",
   filter: "all",
   searchQuery: "",
   openCommentsPostId: null,
   reports: [],
   posts: [],
+  votedPostIds: [],
   questionOfDay: {
     id: "",
     text: DEFAULT_QOTD,
     date: "",
   },
 };
+
+function voteStorageKey() {
+  return state.activeUserId ? `votedPostIds:${state.activeUserId}` : "votedPostIds";
+}
 
 function readLocalState() {
   try {
@@ -71,6 +77,7 @@ function persistLocalState() {
     localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify({
       posts: state.posts,
       reports: state.reports,
+      [voteStorageKey()]: state.votedPostIds,
       questionOfDay: state.questionOfDay,
     }));
   } catch (error) {
@@ -88,6 +95,10 @@ function hydrateLocalState() {
   if (Array.isArray(localState.reports)) {
     state.reports = localState.reports;
   }
+
+  state.votedPostIds = Array.isArray(localState[voteStorageKey()])
+    ? localState[voteStorageKey()]
+    : [];
 
   if (localState.questionOfDay?.text) {
     state.questionOfDay = {
@@ -217,9 +228,58 @@ function setActiveUser(profile) {
     specialNameDisplayEnabled: Boolean(profile.specialNameDisplayEnabled ?? profile.special_name_display_enabled),
     isTeacherVerified: Boolean(profile.isTeacherVerified ?? profile.is_teacher_verified),
   };
+  state.activeUserId = profile.userId || profile.user_id || state.activeUserId || "";
   state.isLoggedIn = true;
   updateActiveUser();
   renderPosts();
+}
+
+async function loadVotesFromSupabase() {
+  if (!supabaseClient || !state.activeUserId) return;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from("votes")
+      .select("post_id")
+      .eq("user_id", state.activeUserId);
+
+    if (error) {
+      showToast(`Vote history load failed: ${error.message}`);
+      return;
+    }
+
+    state.votedPostIds = (data || []).map((vote) => vote.post_id);
+    persistLocalState();
+    renderPosts();
+  } catch (error) {
+    showSupabaseFetchError("Vote history load failed", error);
+  }
+}
+
+async function saveVoteToSupabase(postId) {
+  if (!supabaseClient || !state.activeUserId) return false;
+
+  try {
+    const { error } = await supabaseClient.from("votes").insert({
+      post_id: postId,
+      user_id: state.activeUserId,
+      username: state.activeUser.username,
+    });
+
+    if (error) {
+      if (error.code === "23505") {
+        showToast("You already upvoted this post.");
+      } else {
+        showToast(`Upvote failed: ${error.message}`);
+      }
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    showSupabaseFetchError("Upvote failed", error);
+    return false;
+  }
 }
 
 function profileLine(post) {
@@ -857,12 +917,15 @@ async function restoreActiveSession() {
         : null;
 
     if (profile) {
+      state.activeUserId = user.id;
       setActiveUser(profile);
+      await loadVotesFromSupabase();
       return;
     }
 
     if (metadata.username || user.email) {
       setActiveUser({
+        userId: user.id,
         username: metadata.username || user.email.split("@")[0],
         email: user.email || "",
         profilePictureUrl: metadata.profilePictureUrl || metadata.profile_picture_url || "",
@@ -875,6 +938,7 @@ async function restoreActiveSession() {
         specialNameDisplayEnabled: isAdminUsername(metadata.username || ""),
         isTeacherVerified: false,
       });
+      await loadVotesFromSupabase();
     }
   } catch (error) {
     showSupabaseFetchError("Login session restore failed", error);
@@ -911,7 +975,10 @@ function renderPosts() {
     return;
   }
 
-  feed.innerHTML = filtered.map((post) => `
+  feed.innerHTML = filtered.map((post) => {
+    const hasVoted = state.votedPostIds.includes(post.id);
+
+    return `
     <article class="post-card ${state.openCommentsPostId === post.id ? "comments-open" : ""}" data-role="${escapeHtml(post.role)}" data-anonymous="${post.isAnonymous}">
       <header>
         ${renderProfileFrame(post.initials, post.profilePictureUrl)}
@@ -933,7 +1000,9 @@ function renderPosts() {
       <h3>${escapeHtml(post.title)}</h3>
       <p class="post-body">${escapeHtml(post.body)}</p>
       <div class="post-actions" aria-label="Post actions">
-        <button type="button" data-vote="${post.id}">Upvote ${post.score}</button>
+        <button type="button" data-vote="${post.id}" ${hasVoted ? "disabled" : ""}>
+          ${hasVoted ? "Upvoted" : "Upvote"} ${post.score}
+        </button>
         <button type="button" data-comments="${post.id}" aria-expanded="${state.openCommentsPostId === post.id}" aria-controls="comments-${post.id}">
           ${commentCount(post)} comments
         </button>
@@ -942,7 +1011,8 @@ function renderPosts() {
       </div>
       ${renderComments(post)}
     </article>
-  `).join("");
+  `;
+  }).join("");
   persistLocalState();
 }
 
@@ -1059,6 +1129,8 @@ logoutButton.addEventListener("click", async () => {
 
   state.activeUser = { ...guestUser };
   state.isLoggedIn = false;
+  state.activeUserId = "";
+  state.votedPostIds = [];
   updateActiveUser();
   renderPosts();
   showToast("Logged out.");
@@ -1091,7 +1163,7 @@ document.querySelector("#signupForm").addEventListener("submit", async (event) =
 
   if (supabaseClient) {
     try {
-      const { error: authError } = await supabaseClient.auth.signUp({
+      const { data: authData, error: authError } = await supabaseClient.auth.signUp({
         email,
         password,
         options: {
@@ -1114,6 +1186,7 @@ document.querySelector("#signupForm").addEventListener("submit", async (event) =
       }
 
       await saveProfileToSupabase({ username, email, profilePictureUrl, role: normalizedRole, firstName, lastName });
+      state.activeUserId = authData.user?.id || "";
     } catch (error) {
       showSupabaseFetchError("Account creation failed", error);
       return;
@@ -1124,6 +1197,7 @@ document.querySelector("#signupForm").addEventListener("submit", async (event) =
   }
 
   setActiveUser({
+    userId: state.activeUserId,
     username,
     email,
     profilePictureUrl,
@@ -1161,7 +1235,7 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
 
   if (supabaseClient) {
     try {
-      const { error: authError } = await supabaseClient.auth.signInWithPassword({
+      const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
         email,
         password,
       });
@@ -1176,11 +1250,13 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
         : await getProfileFromSupabase(usernameOrEmail);
 
       if (profile) {
+        state.activeUserId = authData.user?.id || authData.session?.user?.id || "";
         setActiveUser(profile);
       } else {
         const { data: userData } = await supabaseClient.auth.getUser();
         const metadata = userData.user?.user_metadata || {};
         setActiveUser({
+          userId: userData.user?.id || authData.user?.id || authData.session?.user?.id || "",
           username: metadata.username || (usernameOrEmail.includes("@") ? email.split("@")[0] : usernameOrEmail),
           email,
           profilePictureUrl: metadata.profilePictureUrl || metadata.profile_picture_url || "",
@@ -1194,6 +1270,7 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
           isTeacherVerified: false,
         });
       }
+      await loadVotesFromSupabase();
     } catch (error) {
       showSupabaseFetchError("Login failed", error);
       return;
@@ -1470,9 +1547,31 @@ feed.addEventListener("click", async (event) => {
   const deleteButton = event.target.closest("[data-delete-post]");
 
   if (voteButton) {
+    if (!state.isLoggedIn || !state.activeUserId) {
+      showToast("Please log in before upvoting.");
+      loginDialog.showModal();
+      return;
+    }
+
     const post = state.posts.find((item) => item.id === voteButton.dataset.vote);
+    if (!post) return;
+
+    if (state.votedPostIds.includes(post.id)) {
+      showToast("You already upvoted this post.");
+      return;
+    }
+
+    voteButton.disabled = true;
+    const saved = await saveVoteToSupabase(post.id);
+    if (!saved) {
+      voteButton.disabled = false;
+      return;
+    }
+
+    state.votedPostIds.push(post.id);
     post.score += 1;
     renderPosts();
+    showToast("Upvote added.");
   }
 
   if (reportButton) {
