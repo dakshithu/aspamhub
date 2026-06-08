@@ -8,8 +8,13 @@ function createId() {
   return `00000000-0000-4000-8000-${String(Date.now() + idCounter).padStart(12, "0").slice(-12)}`;
 }
 
-const SUPABASE_URL = "https://gutkkcorybzyiievocli.supabase.co";
+const SUPABASE_DIRECT_URL = "https://gutkkcorybzyiievocli.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd1dGtrY29yeWJ6eWlpZXZvY2xpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3NTI0MjksImV4cCI6MjA5NjMyODQyOX0.eMieGnmOli4eXw3celGIRLN2A4luV0ZWQVMKIHQJvYM";
+const shouldUseSupabaseProxy = window.location.protocol.startsWith("http")
+  && !["localhost", "127.0.0.1"].includes(window.location.hostname);
+const SUPABASE_URL = shouldUseSupabaseProxy
+  ? `${window.location.origin}/supabase`
+  : SUPABASE_DIRECT_URL;
 let supabaseClient = null;
 const adminAccount = {
   username: "dakshithu",
@@ -96,7 +101,7 @@ function hydrateLocalState() {
 function showSupabaseFetchError(label, error) {
   const message = error?.message || "Could not reach Supabase";
   console.warn(`${label}: ${message}`, error);
-  showToast(`${label}. Using saved local data for now.`);
+  showToast(`${label}. Supabase could not be reached.`);
 }
 
 const feed = document.querySelector("#feed");
@@ -1111,7 +1116,11 @@ document.querySelector("#signupForm").addEventListener("submit", async (event) =
       await saveProfileToSupabase({ username, email, profilePictureUrl, role: normalizedRole, firstName, lastName });
     } catch (error) {
       showSupabaseFetchError("Account creation failed", error);
+      return;
     }
+  } else {
+    showToast("Account creation needs Supabase to be connected.");
+    return;
   }
 
   setActiveUser({
@@ -1187,34 +1196,11 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
       }
     } catch (error) {
       showSupabaseFetchError("Login failed", error);
-      setActiveUser({
-        username: usernameOrEmail.includes("@") ? email.split("@")[0] : usernameOrEmail,
-        email,
-        profilePictureUrl: "",
-        role: isAdminUsername(usernameOrEmail) ? "admin" : "student",
-        firstName: "",
-        lastName: "",
-        showFullName: isAdminUsername(usernameOrEmail),
-        isStudentCouncilMember: isAdminUsername(usernameOrEmail),
-        studentCouncilRow: isAdminUsername(usernameOrEmail) ? "Grade 8B" : "",
-        specialNameDisplayEnabled: isAdminUsername(usernameOrEmail),
-        isTeacherVerified: false,
-      });
+      return;
     }
   } else {
-    setActiveUser({
-      username: usernameOrEmail.includes("@") ? email.split("@")[0] : usernameOrEmail,
-      email,
-      profilePictureUrl: "",
-      role: isAdminUsername(usernameOrEmail) ? "admin" : "student",
-      firstName: "",
-      lastName: "",
-      showFullName: isAdminUsername(usernameOrEmail),
-      isStudentCouncilMember: isAdminUsername(usernameOrEmail),
-      studentCouncilRow: isAdminUsername(usernameOrEmail) ? "Grade 8B" : "",
-      specialNameDisplayEnabled: isAdminUsername(usernameOrEmail),
-      isTeacherVerified: false,
-    });
+    showToast("Login needs Supabase to be connected.");
+    return;
   }
 
   loginDialog.close();
