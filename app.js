@@ -35,6 +35,7 @@ const guestUser = {
 };
 
 const DEFAULT_QOTD = "What is one thing that would make school life easier this week?";
+const LOCAL_STATE_KEY = "aspamhub.localState.v1";
 
 const state = {
   activeUser: { ...guestUser },
@@ -50,6 +51,53 @@ const state = {
     date: "",
   },
 };
+
+function readLocalState() {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_STATE_KEY) || "{}");
+  } catch (error) {
+    console.warn(`Local state read failed: ${error.message}`);
+    return {};
+  }
+}
+
+function persistLocalState() {
+  try {
+    localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify({
+      posts: state.posts,
+      reports: state.reports,
+      questionOfDay: state.questionOfDay,
+    }));
+  } catch (error) {
+    console.warn(`Local state save failed: ${error.message}`);
+  }
+}
+
+function hydrateLocalState() {
+  const localState = readLocalState();
+
+  if (Array.isArray(localState.posts)) {
+    state.posts = localState.posts;
+  }
+
+  if (Array.isArray(localState.reports)) {
+    state.reports = localState.reports;
+  }
+
+  if (localState.questionOfDay?.text) {
+    state.questionOfDay = {
+      id: localState.questionOfDay.id || "",
+      text: localState.questionOfDay.text,
+      date: localState.questionOfDay.date || todayIsoDate(),
+    };
+  }
+}
+
+function showSupabaseFetchError(label, error) {
+  const message = error?.message || "Could not reach Supabase";
+  console.warn(`${label}: ${message}`, error);
+  showToast(`${label}. Using saved local data for now.`);
+}
 
 const feed = document.querySelector("#feed");
 const signupDialog = document.querySelector("#signupDialog");
@@ -252,67 +300,77 @@ function renderComments(post) {
 async function savePostToSupabase(post) {
   if (!supabaseClient) return;
 
-  const { error } = await supabaseClient.from("posts").insert({
-    id: post.id,
-    author: post.author,
-    role: post.role,
-    initials: post.initials,
-    title: post.title,
-    body: post.body,
-    visibility: post.visibility,
-    profile_picture_url: post.profilePictureUrl,
-    is_anonymous: post.isAnonymous,
-    show_full_name: post.showFullName,
-    first_name: post.firstName,
-    last_name: post.lastName,
-    council: post.council,
-    row_label: post.row,
-    special: post.special,
-    is_teacher_verified: post.isTeacherVerified,
-    score: post.score,
-  });
+  try {
+    const { error } = await supabaseClient.from("posts").insert({
+      id: post.id,
+      author: post.author,
+      role: post.role,
+      initials: post.initials,
+      title: post.title,
+      body: post.body,
+      visibility: post.visibility,
+      profile_picture_url: post.profilePictureUrl,
+      is_anonymous: post.isAnonymous,
+      show_full_name: post.showFullName,
+      first_name: post.firstName,
+      last_name: post.lastName,
+      council: post.council,
+      row_label: post.row,
+      special: post.special,
+      is_teacher_verified: post.isTeacherVerified,
+      score: post.score,
+    });
 
-  if (error) {
-    showToast(`Supabase post save failed: ${error.message}`);
+    if (error) {
+      showToast(`Supabase post save failed: ${error.message}`);
+    }
+  } catch (error) {
+    showSupabaseFetchError("Post save failed", error);
   }
 }
 
 async function saveProfileToSupabase(profile) {
   if (!supabaseClient) return;
 
-  const { error } = await supabaseClient.from("profiles").upsert({
-    username: profile.username,
-    profile_picture_url: profile.profilePictureUrl || "",
-    role: profile.role,
-    first_name: profile.firstName,
-    last_name: profile.lastName,
-    show_full_name: isAdminUsername(profile.username),
-    is_student_council_member: isAdminUsername(profile.username),
-    student_council_row: isAdminUsername(profile.username) ? "Grade 8B" : null,
-    special_name_display_enabled: isAdminUsername(profile.username),
-    is_teacher_verified: false,
-  });
-
-  if (error) {
-    showToast(`Profile save failed: ${error.message}`);
-    return;
-  }
-
-  await supabaseClient.auth.updateUser({
-    data: {
+  try {
+    const { error } = await supabaseClient.from("profiles").upsert({
       username: profile.username,
-      role: profile.role,
-      firstName: profile.firstName,
-      lastName: profile.lastName,
-      profilePictureUrl: profile.profilePictureUrl || "",
+      email: profile.email,
       profile_picture_url: profile.profilePictureUrl || "",
-    },
-  });
+      role: profile.role,
+      first_name: profile.firstName,
+      last_name: profile.lastName,
+      show_full_name: isAdminUsername(profile.username),
+      is_student_council_member: isAdminUsername(profile.username),
+      student_council_row: isAdminUsername(profile.username) ? "Grade 8B" : null,
+      special_name_display_enabled: isAdminUsername(profile.username),
+      is_teacher_verified: false,
+    });
+
+    if (error) {
+      showToast(`Profile save failed: ${error.message}`);
+      return;
+    }
+
+    await supabaseClient.auth.updateUser({
+      data: {
+        username: profile.username,
+        role: profile.role,
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        profilePictureUrl: profile.profilePictureUrl || "",
+        profile_picture_url: profile.profilePictureUrl || "",
+      },
+    });
+  } catch (error) {
+    showSupabaseFetchError("Profile save failed", error);
+  }
 }
 
 async function updateProfilePictureInSupabase(username, profilePictureUrl) {
   if (!supabaseClient) return username;
 
+  try {
   const { data: userData } = await supabaseClient.auth.getUser();
   const metadataUsername = userData.user?.user_metadata?.username;
   const profile = await getProfileFromSupabase(username)
@@ -369,23 +427,32 @@ async function updateProfilePictureInSupabase(username, profilePictureUrl) {
   });
 
   return persistedUsername;
+  } catch (error) {
+    showSupabaseFetchError("Profile picture save failed", error);
+    return false;
+  }
 }
 
 async function getProfileFromSupabase(username) {
   if (!supabaseClient) return null;
 
-  const { data, error } = await supabaseClient
-    .from("profiles")
-    .select("*")
-    .eq("username", username)
-    .maybeSingle();
+  try {
+    const { data, error } = await supabaseClient
+      .from("profiles")
+      .select("*")
+      .eq("username", username)
+      .maybeSingle();
 
-  if (error) {
-    showToast(`Profile load failed: ${error.message}`);
+    if (error) {
+      showToast(`Profile load failed: ${error.message}`);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    showSupabaseFetchError("Profile load failed", error);
     return null;
   }
-
-  return data;
 }
 
 async function getProfileByEmailFromSupabase(email) {
@@ -399,60 +466,76 @@ async function getProfileByEmailFromSupabase(email) {
 async function saveCommentToSupabase(postId, comment) {
   if (!supabaseClient) return;
 
-  const { error } = await supabaseClient.from("comments").insert({
-    post_id: postId,
-    author: comment.author,
-    role: comment.role,
-    body: comment.body,
-    is_anonymous: comment.isAnonymous,
-  });
+  try {
+    const { error } = await supabaseClient.from("comments").insert({
+      post_id: postId,
+      author: comment.author,
+      role: comment.role,
+      body: comment.body,
+      is_anonymous: comment.isAnonymous,
+    });
 
-  if (error) {
-    showToast(`Supabase comment save failed: ${error.message}`);
+    if (error) {
+      showToast(`Supabase comment save failed: ${error.message}`);
+    }
+  } catch (error) {
+    showSupabaseFetchError("Comment save failed", error);
   }
 }
 
 async function saveVerificationToSupabase() {
   if (!supabaseClient) return;
 
-  const { error } = await supabaseClient.from("verification_requests").insert({
-    username: state.activeUser.username,
-    message: "Please go Meet student Dakshith U of Grade 8B",
-  });
+  try {
+    const { error } = await supabaseClient.from("verification_requests").insert({
+      username: state.activeUser.username,
+      message: "Please go Meet student Dakshith U of Grade 8B",
+    });
 
-  if (error) {
-    showToast(`Verification save failed: ${error.message}`);
+    if (error) {
+      showToast(`Verification save failed: ${error.message}`);
+    }
+  } catch (error) {
+    showSupabaseFetchError("Verification save failed", error);
   }
 }
 
 async function saveReportToSupabase(report) {
   if (!supabaseClient) return;
 
-  const { error } = await supabaseClient.from("reports").insert({
-    id: report.id,
-    post_id: report.postId,
-    post_title: report.postTitle,
-    post_author: report.postAuthor,
-    reported_by: report.reportedBy,
-    reason: report.reason,
-    status: report.status,
-  });
+  try {
+    const { error } = await supabaseClient.from("reports").insert({
+      id: report.id,
+      post_id: report.postId,
+      post_title: report.postTitle,
+      post_author: report.postAuthor,
+      reported_by: report.reportedBy,
+      reason: report.reason,
+      status: report.status,
+    });
 
-  if (error) {
-    showToast(`Report save failed: ${error.message}`);
+    if (error) {
+      showToast(`Report save failed: ${error.message}`);
+    }
+  } catch (error) {
+    showSupabaseFetchError("Report save failed", error);
   }
 }
 
 async function updateReportStatus(reportId, status) {
   if (!supabaseClient) return;
 
-  const { error } = await supabaseClient
-    .from("reports")
-    .update({ status })
-    .eq("id", reportId);
+  try {
+    const { error } = await supabaseClient
+      .from("reports")
+      .update({ status })
+      .eq("id", reportId);
 
-  if (error) {
-    showToast(`Report update failed: ${error.message}`);
+    if (error) {
+      showToast(`Report update failed: ${error.message}`);
+    }
+  } catch (error) {
+    showSupabaseFetchError("Report update failed", error);
   }
 }
 
@@ -469,41 +552,51 @@ async function loadQuestionOfDay() {
     return;
   }
 
-  const today = todayIsoDate();
-  const { data: todayQuestion, error: todayError } = await supabaseClient
-    .from("questions_of_day")
-    .select("*")
-    .eq("question_date", today)
-    .maybeSingle();
-
-  if (todayError) {
-    showToast(`Question of the Day load failed: ${todayError.message}`);
-  }
-
-  let question = todayQuestion;
-  if (!question) {
-    const { data: latestQuestions, error: latestError } = await supabaseClient
+  try {
+    const today = todayIsoDate();
+    const { data: todayQuestion, error: todayError } = await supabaseClient
       .from("questions_of_day")
       .select("*")
-      .order("question_date", { ascending: false })
-      .limit(1);
+      .eq("question_date", today)
+      .maybeSingle();
 
-    if (latestError) {
-      showToast(`Question of the Day fallback failed: ${latestError.message}`);
+    if (todayError) {
+      showToast(`Question of the Day load failed: ${todayError.message}`);
     }
 
-    question = latestQuestions?.[0] || null;
+    let question = todayQuestion;
+    if (!question) {
+      const { data: latestQuestions, error: latestError } = await supabaseClient
+        .from("questions_of_day")
+        .select("*")
+        .order("question_date", { ascending: false })
+        .limit(1);
+
+      if (latestError) {
+        showToast(`Question of the Day fallback failed: ${latestError.message}`);
+      }
+
+      question = latestQuestions?.[0] || null;
+    }
+
+    state.questionOfDay = question
+      ? {
+          id: question.id,
+          text: question.question_text,
+          date: question.question_date,
+        }
+      : state.questionOfDay.text
+        ? state.questionOfDay
+        : fallback;
+  } catch (error) {
+    showSupabaseFetchError("Question of the Day load failed", error);
+    if (!state.questionOfDay.text) {
+      state.questionOfDay = fallback;
+    }
   }
 
-  state.questionOfDay = question
-    ? {
-        id: question.id,
-        text: question.question_text,
-        date: question.question_date,
-      }
-    : fallback;
-
   updateQuestionOfDayTitle();
+  persistLocalState();
 }
 
 async function saveQuestionOfDay(questionText) {
@@ -518,31 +611,37 @@ async function saveQuestionOfDay(questionText) {
 
   state.questionOfDay = question;
   updateQuestionOfDayTitle();
+  persistLocalState();
 
   if (!supabaseClient) return true;
 
-  const { data, error } = await supabaseClient
-    .from("questions_of_day")
-    .upsert({
-      question_text: trimmedQuestion,
-      question_date: question.date,
-      created_by: state.activeUser.username,
-    }, { onConflict: "question_date" })
-    .select()
-    .maybeSingle();
+  try {
+    const { data, error } = await supabaseClient
+      .from("questions_of_day")
+      .upsert({
+        question_text: trimmedQuestion,
+        question_date: question.date,
+        created_by: state.activeUser.username,
+      }, { onConflict: "question_date" })
+      .select()
+      .maybeSingle();
 
-  if (error) {
-    showToast(`Question of the Day save failed: ${error.message}`);
-    return false;
-  }
+    if (error) {
+      showToast(`Question of the Day save failed: ${error.message}`);
+      return false;
+    }
 
-  if (data) {
-    state.questionOfDay = {
-      id: data.id,
-      text: data.question_text,
-      date: data.question_date,
-    };
-    updateQuestionOfDayTitle();
+    if (data) {
+      state.questionOfDay = {
+        id: data.id,
+        text: data.question_text,
+        date: data.question_date,
+      };
+      updateQuestionOfDayTitle();
+      persistLocalState();
+    }
+  } catch (error) {
+    showSupabaseFetchError("Question of the Day save failed", error);
   }
 
   return true;
@@ -551,13 +650,18 @@ async function saveQuestionOfDay(questionText) {
 async function markPostRemoved(postId) {
   if (!supabaseClient) return true;
 
-  const { error } = await supabaseClient
-    .from("posts")
-    .delete()
-    .eq("id", postId);
+  try {
+    const { error } = await supabaseClient
+      .from("posts")
+      .delete()
+      .eq("id", postId);
 
-  if (error) {
-    showToast(`Post delete failed: ${error.message}`);
+    if (error) {
+      showToast(`Post delete failed: ${error.message}`);
+      return false;
+    }
+  } catch (error) {
+    showSupabaseFetchError("Post delete failed", error);
     return false;
   }
 
@@ -574,23 +678,27 @@ async function grantStudentCouncil(username) {
   });
 
   if (supabaseClient) {
-    await supabaseClient
-      .from("profiles")
-      .update({
-        is_student_council_member: true,
-        student_council_row: "Student Council",
-        special_name_display_enabled: true,
-      })
-      .eq("username", username);
+    try {
+      await supabaseClient
+        .from("profiles")
+        .update({
+          is_student_council_member: true,
+          student_council_row: "Student Council",
+          special_name_display_enabled: true,
+        })
+        .eq("username", username);
 
-    await supabaseClient
-      .from("posts")
-      .update({
-        council: true,
-        row_label: "Student Council",
-        special: true,
-      })
-      .eq("author", username);
+      await supabaseClient
+        .from("posts")
+        .update({
+          council: true,
+          row_label: "Student Council",
+          special: true,
+        })
+        .eq("author", username);
+    } catch (error) {
+      showSupabaseFetchError("Student council update failed", error);
+    }
   }
 
   renderPosts();
@@ -608,16 +716,20 @@ async function markTeacherVerified(username) {
   }
 
   if (supabaseClient) {
-    await supabaseClient
-      .from("profiles")
-      .update({ is_teacher_verified: true })
-      .eq("username", username);
+    try {
+      await supabaseClient
+        .from("profiles")
+        .update({ is_teacher_verified: true })
+        .eq("username", username);
 
-    await supabaseClient
-      .from("posts")
-      .update({ is_teacher_verified: true })
-      .eq("author", username)
-      .eq("role", "teacher");
+      await supabaseClient
+        .from("posts")
+        .update({ is_teacher_verified: true })
+        .eq("author", username)
+        .eq("role", "teacher");
+    } catch (error) {
+      showSupabaseFetchError("Teacher verification update failed", error);
+    }
   }
 
   renderPosts();
@@ -626,75 +738,91 @@ async function markTeacherVerified(username) {
 async function loadFromSupabase() {
   if (!supabaseClient) return;
 
-  const { data: posts, error: postsError } = await supabaseClient
-    .from("posts")
-    .select("*")
-    .order("created_at", { ascending: false });
+  try {
+    const { data: posts, error: postsError } = await supabaseClient
+      .from("posts")
+      .select("*")
+      .order("created_at", { ascending: false });
 
-  if (postsError) {
-    showToast(`Supabase post load failed: ${postsError.message}`);
-    return;
-  }
+    if (postsError) {
+      showToast(`Supabase post load failed: ${postsError.message}`);
+      return;
+    }
 
-  const { data: comments, error: commentsError } = await supabaseClient
-    .from("comments")
-    .select("*")
-    .order("created_at", { ascending: true });
+    const { data: comments = [], error: commentsError } = await supabaseClient
+      .from("comments")
+      .select("*")
+      .order("created_at", { ascending: true });
 
-  if (commentsError) {
-    showToast(`Supabase comment load failed: ${commentsError.message}`);
-    return;
-  }
+    if (commentsError) {
+      showToast(`Supabase comment load failed: ${commentsError.message}`);
+    }
 
-  const { data: reports, error: reportsError } = await supabaseClient
-    .from("reports")
-    .select("*")
-    .eq("status", "open")
-    .order("created_at", { ascending: false });
+    const { data: reports = [], error: reportsError } = await supabaseClient
+      .from("reports")
+      .select("*")
+      .eq("status", "open")
+      .order("created_at", { ascending: false });
 
-  if (!reportsError) {
-    state.reports = reports.map((report) => ({
-      id: report.id,
-      postId: report.post_id,
-      postTitle: report.post_title,
-      postAuthor: report.post_author,
-      reportedBy: report.reported_by,
-      reason: report.reason,
-      status: report.status,
+    const safePosts = Array.isArray(posts) ? posts : [];
+    const safeComments = Array.isArray(comments) ? comments : [];
+    const safeReports = Array.isArray(reports) ? reports : [];
+
+    if (!safeReports.length && reportsError) {
+      showToast(`Report load failed: ${reportsError.message}`);
+    }
+
+    if (!reportsError) {
+      state.reports = safeReports.map((report) => ({
+        id: report.id,
+        postId: report.post_id,
+        postTitle: report.post_title,
+        postAuthor: report.post_author,
+        reportedBy: report.reported_by,
+        reason: report.reason,
+        status: report.status,
+      }));
+    }
+
+    if (!safePosts.length) {
+      persistLocalState();
+      return;
+    }
+
+    state.posts = safePosts.map((post) => ({
+      id: post.id,
+      author: post.author,
+      role: post.role,
+      initials: post.initials,
+      profilePictureUrl: post.profile_picture_url || "",
+      title: post.title,
+      body: post.body,
+      visibility: post.visibility,
+      isAnonymous: post.is_anonymous,
+      showFullName: post.show_full_name,
+      firstName: post.first_name,
+      lastName: post.last_name,
+      council: post.council,
+      row: post.row_label,
+      special: post.special,
+      isTeacherVerified: post.is_teacher_verified,
+      status: post.status || "published",
+      score: post.score,
+      comments: safeComments
+        .filter((comment) => comment.post_id === post.id)
+        .map((comment) => ({
+          id: comment.id,
+          author: comment.author,
+          role: comment.role,
+          body: comment.body,
+          isAnonymous: comment.is_anonymous,
+        })),
     }));
+
+    persistLocalState();
+  } catch (error) {
+    showSupabaseFetchError("Supabase feed load failed", error);
   }
-
-  if (!posts.length) return;
-
-  state.posts = posts.map((post) => ({
-    id: post.id,
-    author: post.author,
-    role: post.role,
-    initials: post.initials,
-    profilePictureUrl: post.profile_picture_url || "",
-    title: post.title,
-    body: post.body,
-    visibility: post.visibility,
-    isAnonymous: post.is_anonymous,
-    showFullName: post.show_full_name,
-    firstName: post.first_name,
-    lastName: post.last_name,
-    council: post.council,
-    row: post.row_label,
-    special: post.special,
-    isTeacherVerified: post.is_teacher_verified,
-    status: post.status || "published",
-    score: post.score,
-    comments: comments
-      .filter((comment) => comment.post_id === post.id)
-      .map((comment) => ({
-        id: comment.id,
-        author: comment.author,
-        role: comment.role,
-        body: comment.body,
-        isAnonymous: comment.is_anonymous,
-      })),
-  }));
 }
 
 async function setupSupabase() {
@@ -711,36 +839,40 @@ async function setupSupabase() {
 async function restoreActiveSession() {
   if (!supabaseClient) return;
 
-  const { data, error } = await supabaseClient.auth.getSession();
-  if (error || !data.session?.user) return;
+  try {
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error || !data.session?.user) return;
 
-  const user = data.session.user;
-  const metadata = user.user_metadata || {};
-  const profile = metadata.username
-    ? await getProfileFromSupabase(metadata.username)
-    : user.email
-      ? await getProfileFromSupabase(user.email.split("@")[0])
-      : null;
+    const user = data.session.user;
+    const metadata = user.user_metadata || {};
+    const profile = metadata.username
+      ? await getProfileFromSupabase(metadata.username)
+      : user.email
+        ? await getProfileFromSupabase(user.email.split("@")[0])
+        : null;
 
-  if (profile) {
-    setActiveUser(profile);
-    return;
-  }
+    if (profile) {
+      setActiveUser(profile);
+      return;
+    }
 
-  if (metadata.username || user.email) {
-    setActiveUser({
-      username: metadata.username || user.email.split("@")[0],
-      email: user.email || "",
-      profilePictureUrl: metadata.profilePictureUrl || metadata.profile_picture_url || "",
-      role: isAdminUsername(metadata.username || "") ? "admin" : metadata.role || "student",
-      firstName: metadata.firstName || metadata.first_name || "",
-      lastName: metadata.lastName || metadata.last_name || "",
-      showFullName: isAdminUsername(metadata.username || ""),
-      isStudentCouncilMember: isAdminUsername(metadata.username || ""),
-      studentCouncilRow: isAdminUsername(metadata.username || "") ? "Grade 8B" : "",
-      specialNameDisplayEnabled: isAdminUsername(metadata.username || ""),
-      isTeacherVerified: false,
-    });
+    if (metadata.username || user.email) {
+      setActiveUser({
+        username: metadata.username || user.email.split("@")[0],
+        email: user.email || "",
+        profilePictureUrl: metadata.profilePictureUrl || metadata.profile_picture_url || "",
+        role: isAdminUsername(metadata.username || "") ? "admin" : metadata.role || "student",
+        firstName: metadata.firstName || metadata.first_name || "",
+        lastName: metadata.lastName || metadata.last_name || "",
+        showFullName: isAdminUsername(metadata.username || ""),
+        isStudentCouncilMember: isAdminUsername(metadata.username || ""),
+        studentCouncilRow: isAdminUsername(metadata.username || "") ? "Grade 8B" : "",
+        specialNameDisplayEnabled: isAdminUsername(metadata.username || ""),
+        isTeacherVerified: false,
+      });
+    }
+  } catch (error) {
+    showSupabaseFetchError("Login session restore failed", error);
   }
 }
 
@@ -770,6 +902,7 @@ function renderPosts() {
     feed.innerHTML = hasFilters
       ? `<article class="post-card empty-feed"><h3>No posts found</h3><p class="post-body">Try another search or filter.</p></article>`
       : `<article class="post-card empty-feed"><h3>No posts yet</h3><p class="post-body">Create the first AspamHub post.</p></article>`;
+    persistLocalState();
     return;
   }
 
@@ -805,6 +938,7 @@ function renderPosts() {
       ${renderComments(post)}
     </article>
   `).join("");
+  persistLocalState();
 }
 
 function renderModerationQueue() {
@@ -911,7 +1045,11 @@ document.querySelector("#cropForm").addEventListener("submit", (event) => {
 
 logoutButton.addEventListener("click", async () => {
   if (supabaseClient) {
-    await supabaseClient.auth.signOut();
+    try {
+      await supabaseClient.auth.signOut();
+    } catch (error) {
+      showSupabaseFetchError("Logout failed", error);
+    }
   }
 
   state.activeUser = { ...guestUser };
@@ -947,29 +1085,33 @@ document.querySelector("#signupForm").addEventListener("submit", async (event) =
   }
 
   if (supabaseClient) {
-    const { error: authError } = await supabaseClient.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          username,
-          role: normalizedRole,
-          firstName,
-          lastName,
-          first_name: firstName,
-          last_name: lastName,
-          profilePictureUrl,
-          profile_picture_url: profilePictureUrl,
+    try {
+      const { error: authError } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            username,
+            role: normalizedRole,
+            firstName,
+            lastName,
+            first_name: firstName,
+            last_name: lastName,
+            profilePictureUrl,
+            profile_picture_url: profilePictureUrl,
+          },
         },
-      },
-    });
+      });
 
-    if (authError) {
-      showToast(`Account creation failed: ${authError.message}`);
-      return;
+      if (authError) {
+        showToast(`Account creation failed: ${authError.message}`);
+        return;
+      }
+
+      await saveProfileToSupabase({ username, email, profilePictureUrl, role: normalizedRole, firstName, lastName });
+    } catch (error) {
+      showSupabaseFetchError("Account creation failed", error);
     }
-
-    await saveProfileToSupabase({ username, email, profilePictureUrl, role: normalizedRole, firstName, lastName });
   }
 
   setActiveUser({
@@ -1009,32 +1151,49 @@ document.querySelector("#loginForm").addEventListener("submit", async (event) =>
   }
 
   if (supabaseClient) {
-    const { error: authError } = await supabaseClient.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (authError) {
-      showToast(`Login failed: ${authError.message}`);
-      return;
-    }
-
-    const profile = usernameOrEmail.includes("@")
-      ? await getProfileByEmailFromSupabase(email)
-      : await getProfileFromSupabase(usernameOrEmail);
-
-    if (profile) {
-      setActiveUser(profile);
-    } else {
-      const { data: userData } = await supabaseClient.auth.getUser();
-      const metadata = userData.user?.user_metadata || {};
-      setActiveUser({
-        username: metadata.username || (usernameOrEmail.includes("@") ? email.split("@")[0] : usernameOrEmail),
+    try {
+      const { error: authError } = await supabaseClient.auth.signInWithPassword({
         email,
-        profilePictureUrl: metadata.profilePictureUrl || metadata.profile_picture_url || "",
-        role: isAdminUsername(usernameOrEmail) ? "admin" : metadata.role || "student",
-        firstName: metadata.firstName || "",
-        lastName: metadata.lastName || "",
+        password,
+      });
+
+      if (authError) {
+        showToast(`Login failed: ${authError.message}`);
+        return;
+      }
+
+      const profile = usernameOrEmail.includes("@")
+        ? await getProfileByEmailFromSupabase(email)
+        : await getProfileFromSupabase(usernameOrEmail);
+
+      if (profile) {
+        setActiveUser(profile);
+      } else {
+        const { data: userData } = await supabaseClient.auth.getUser();
+        const metadata = userData.user?.user_metadata || {};
+        setActiveUser({
+          username: metadata.username || (usernameOrEmail.includes("@") ? email.split("@")[0] : usernameOrEmail),
+          email,
+          profilePictureUrl: metadata.profilePictureUrl || metadata.profile_picture_url || "",
+          role: isAdminUsername(usernameOrEmail) ? "admin" : metadata.role || "student",
+          firstName: metadata.firstName || "",
+          lastName: metadata.lastName || "",
+          showFullName: isAdminUsername(usernameOrEmail),
+          isStudentCouncilMember: isAdminUsername(usernameOrEmail),
+          studentCouncilRow: isAdminUsername(usernameOrEmail) ? "Grade 8B" : "",
+          specialNameDisplayEnabled: isAdminUsername(usernameOrEmail),
+          isTeacherVerified: false,
+        });
+      }
+    } catch (error) {
+      showSupabaseFetchError("Login failed", error);
+      setActiveUser({
+        username: usernameOrEmail.includes("@") ? email.split("@")[0] : usernameOrEmail,
+        email,
+        profilePictureUrl: "",
+        role: isAdminUsername(usernameOrEmail) ? "admin" : "student",
+        firstName: "",
+        lastName: "",
         showFullName: isAdminUsername(usernameOrEmail),
         isStudentCouncilMember: isAdminUsername(usernameOrEmail),
         studentCouncilRow: isAdminUsername(usernameOrEmail) ? "Grade 8B" : "",
@@ -1072,9 +1231,15 @@ document.querySelector("#forgotPasswordForm").addEventListener("submit", async (
     return;
   }
 
-  const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
-    redirectTo: window.location.href,
-  });
+  let error = null;
+  try {
+    ({ error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.href,
+    }));
+  } catch (fetchError) {
+    showSupabaseFetchError("Reset email failed", fetchError);
+    return;
+  }
 
   if (error) {
     showToast(`Reset email failed: ${error.message}`);
@@ -1445,6 +1610,7 @@ feed.addEventListener("submit", async (event) => {
 });
 
 async function initializeApp() {
+  hydrateLocalState();
   updateActiveUser();
   await setupSupabase();
   await restoreActiveSession();
