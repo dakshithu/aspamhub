@@ -115,6 +115,11 @@ function showSupabaseFetchError(label, error) {
   showToast(`${label}. Supabase could not be reached.`);
 }
 
+function logSupabaseSyncError(label, error) {
+  const message = error?.message || "Unknown Supabase error";
+  console.warn(`${label}: ${message}`, error);
+}
+
 const feed = document.querySelector("#feed");
 const signupDialog = document.querySelector("#signupDialog");
 const loginDialog = document.querySelector("#loginDialog");
@@ -244,7 +249,7 @@ async function loadVotesFromSupabase() {
       .eq("user_id", state.activeUserId);
 
     if (error) {
-      showToast(`Vote history load failed: ${error.message}`);
+      logSupabaseSyncError("Vote history load failed", error);
       return;
     }
 
@@ -252,7 +257,7 @@ async function loadVotesFromSupabase() {
     persistLocalState();
     renderPosts();
   } catch (error) {
-    showSupabaseFetchError("Vote history load failed", error);
+    logSupabaseSyncError("Vote history load failed", error);
   }
 }
 
@@ -363,7 +368,7 @@ function renderComments(post) {
 }
 
 async function savePostToSupabase(post) {
-  if (!supabaseClient) return;
+  if (!supabaseClient) return false;
 
   try {
     const { error } = await supabaseClient.from("posts").insert({
@@ -387,15 +392,19 @@ async function savePostToSupabase(post) {
     });
 
     if (error) {
-      showToast(`Supabase post save failed: ${error.message}`);
+      logSupabaseSyncError("Post sync failed", error);
+      return false;
     }
   } catch (error) {
-    showSupabaseFetchError("Post save failed", error);
+    logSupabaseSyncError("Post sync failed", error);
+    return false;
   }
+
+  return true;
 }
 
 async function saveProfileToSupabase(profile) {
-  if (!supabaseClient) return;
+  if (!supabaseClient) return false;
 
   try {
     const { error } = await supabaseClient.from("profiles").upsert({
@@ -413,8 +422,8 @@ async function saveProfileToSupabase(profile) {
     });
 
     if (error) {
-      showToast(`Profile save failed: ${error.message}`);
-      return;
+      logSupabaseSyncError("Profile sync failed", error);
+      return false;
     }
 
     await supabaseClient.auth.updateUser({
@@ -428,8 +437,11 @@ async function saveProfileToSupabase(profile) {
       },
     });
   } catch (error) {
-    showSupabaseFetchError("Profile save failed", error);
+    logSupabaseSyncError("Profile sync failed", error);
+    return false;
   }
+
+  return true;
 }
 
 async function updateProfilePictureInSupabase(username, profilePictureUrl) {
@@ -450,13 +462,14 @@ async function updateProfilePictureInSupabase(username, profilePictureUrl) {
     .maybeSingle();
 
   if (error) {
-    showToast(`Profile picture save failed: ${error.message}`);
-    return false;
+    logSupabaseSyncError("Profile picture sync failed", error);
+    return persistedUsername;
   }
 
   if (!updatedProfile) {
     const { error: insertError } = await supabaseClient.from("profiles").insert({
       username: persistedUsername,
+      email: state.activeUser.email,
       profile_picture_url: profilePictureUrl,
       role: state.activeUser.role,
       first_name: state.activeUser.firstName,
@@ -469,8 +482,8 @@ async function updateProfilePictureInSupabase(username, profilePictureUrl) {
     });
 
     if (insertError) {
-      showToast(`Profile picture save failed: ${insertError.message}`);
-      return false;
+      logSupabaseSyncError("Profile picture sync failed", insertError);
+      return persistedUsername;
     }
   }
 
@@ -481,7 +494,7 @@ async function updateProfilePictureInSupabase(username, profilePictureUrl) {
     .eq("is_anonymous", false);
 
   if (postsError) {
-    showToast(`Post profile pictures did not update: ${postsError.message}`);
+    logSupabaseSyncError("Post profile picture sync failed", postsError);
   }
 
   await supabaseClient.auth.updateUser({
@@ -493,8 +506,8 @@ async function updateProfilePictureInSupabase(username, profilePictureUrl) {
 
   return persistedUsername;
   } catch (error) {
-    showSupabaseFetchError("Profile picture save failed", error);
-    return false;
+    logSupabaseSyncError("Profile picture sync failed", error);
+    return username;
   }
 }
 
@@ -509,13 +522,13 @@ async function getProfileFromSupabase(username) {
       .maybeSingle();
 
     if (error) {
-      showToast(`Profile load failed: ${error.message}`);
+      logSupabaseSyncError("Profile load failed", error);
       return null;
     }
 
     return data;
   } catch (error) {
-    showSupabaseFetchError("Profile load failed", error);
+    logSupabaseSyncError("Profile load failed", error);
     return null;
   }
 }
@@ -529,7 +542,7 @@ async function getProfileByEmailFromSupabase(email) {
 }
 
 async function saveCommentToSupabase(postId, comment) {
-  if (!supabaseClient) return;
+  if (!supabaseClient) return false;
 
   try {
     const { error } = await supabaseClient.from("comments").insert({
@@ -541,15 +554,19 @@ async function saveCommentToSupabase(postId, comment) {
     });
 
     if (error) {
-      showToast(`Supabase comment save failed: ${error.message}`);
+      logSupabaseSyncError("Comment sync failed", error);
+      return false;
     }
   } catch (error) {
-    showSupabaseFetchError("Comment save failed", error);
+    logSupabaseSyncError("Comment sync failed", error);
+    return false;
   }
+
+  return true;
 }
 
 async function saveVerificationToSupabase() {
-  if (!supabaseClient) return;
+  if (!supabaseClient) return false;
 
   try {
     const { error } = await supabaseClient.from("verification_requests").insert({
@@ -558,15 +575,19 @@ async function saveVerificationToSupabase() {
     });
 
     if (error) {
-      showToast(`Verification save failed: ${error.message}`);
+      logSupabaseSyncError("Verification sync failed", error);
+      return false;
     }
   } catch (error) {
-    showSupabaseFetchError("Verification save failed", error);
+    logSupabaseSyncError("Verification sync failed", error);
+    return false;
   }
+
+  return true;
 }
 
 async function saveReportToSupabase(report) {
-  if (!supabaseClient) return;
+  if (!supabaseClient) return false;
 
   try {
     const { error } = await supabaseClient.from("reports").insert({
@@ -580,11 +601,15 @@ async function saveReportToSupabase(report) {
     });
 
     if (error) {
-      showToast(`Report save failed: ${error.message}`);
+      logSupabaseSyncError("Report sync failed", error);
+      return false;
     }
   } catch (error) {
-    showSupabaseFetchError("Report save failed", error);
+    logSupabaseSyncError("Report sync failed", error);
+    return false;
   }
+
+  return true;
 }
 
 async function updateReportStatus(reportId, status) {
@@ -626,7 +651,7 @@ async function loadQuestionOfDay() {
       .maybeSingle();
 
     if (todayError) {
-      showToast(`Question of the Day load failed: ${todayError.message}`);
+      logSupabaseSyncError("Question of the Day load failed", todayError);
     }
 
     let question = todayQuestion;
@@ -638,7 +663,7 @@ async function loadQuestionOfDay() {
         .limit(1);
 
       if (latestError) {
-        showToast(`Question of the Day fallback failed: ${latestError.message}`);
+        logSupabaseSyncError("Question of the Day fallback failed", latestError);
       }
 
       question = latestQuestions?.[0] || null;
@@ -654,7 +679,7 @@ async function loadQuestionOfDay() {
         ? state.questionOfDay
         : fallback;
   } catch (error) {
-    showSupabaseFetchError("Question of the Day load failed", error);
+    logSupabaseSyncError("Question of the Day load failed", error);
     if (!state.questionOfDay.text) {
       state.questionOfDay = fallback;
     }
@@ -692,8 +717,8 @@ async function saveQuestionOfDay(questionText) {
       .maybeSingle();
 
     if (error) {
-      showToast(`Question of the Day save failed: ${error.message}`);
-      return false;
+      logSupabaseSyncError("Question of the Day sync failed", error);
+      return true;
     }
 
     if (data) {
@@ -706,7 +731,7 @@ async function saveQuestionOfDay(questionText) {
       persistLocalState();
     }
   } catch (error) {
-    showSupabaseFetchError("Question of the Day save failed", error);
+    logSupabaseSyncError("Question of the Day sync failed", error);
   }
 
   return true;
@@ -810,7 +835,7 @@ async function loadFromSupabase() {
       .order("created_at", { ascending: false });
 
     if (postsError) {
-      showToast(`Supabase post load failed: ${postsError.message}`);
+      logSupabaseSyncError("Post load failed", postsError);
       return;
     }
 
@@ -820,7 +845,7 @@ async function loadFromSupabase() {
       .order("created_at", { ascending: true });
 
     if (commentsError) {
-      showToast(`Supabase comment load failed: ${commentsError.message}`);
+      logSupabaseSyncError("Comment load failed", commentsError);
     }
 
     const { data: reports = [], error: reportsError } = await supabaseClient
@@ -834,7 +859,7 @@ async function loadFromSupabase() {
     const safeReports = Array.isArray(reports) ? reports : [];
 
     if (!safeReports.length && reportsError) {
-      showToast(`Report load failed: ${reportsError.message}`);
+      logSupabaseSyncError("Report load failed", reportsError);
     }
 
     if (!reportsError) {
@@ -886,7 +911,7 @@ async function loadFromSupabase() {
 
     persistLocalState();
   } catch (error) {
-    showSupabaseFetchError("Supabase feed load failed", error);
+    logSupabaseSyncError("Supabase feed load failed", error);
   }
 }
 
